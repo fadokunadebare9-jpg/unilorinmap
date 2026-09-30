@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#002147">
+<title>UNILORIN Smart Map · Better by Far</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* ===== 1. TOKENS ===== */
+:root{
+  --navy:#002147; --gold:#D4AF37; --green:#2E7D32; --red:#C62828;
+  --glass:rgba(255,255,255,.85); --ink:#10233f; --mute:#5b6b82; --line:rgba(0,33,71,.12);
+  --r:16px; --sh:0 10px 34px rgba(0,33,71,.25);
+  --sans:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; --serif:Georgia,"Times New Roman",serif;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;overflow:hidden;font-family:var(--sans);color:var(--ink);max-width:100vw}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+svg{flex:none}
+
+/* ===== 2. MAP ===== */
+#map{position:fixed;inset:0;background:#e9eef5 repeating-linear-gradient(45deg,transparent 0 14px,rgba(0,33,71,.04) 14px 15px)}
+.leaflet-popup-content-wrapper{border-radius:var(--r);box-shadow:var(--sh);padding:0;overflow:hidden}
+.leaflet-popup-content{margin:0;width:250px!important;font-family:var(--sans)}
+.leaflet-popup-close-button{z-index:2;color:#fff!important;text-shadow:0 1px 3px #000}
+.pop .thumb{height:84px;background:linear-gradient(135deg,var(--c),var(--navy));display:grid;place-items:center;color:rgba(255,255,255,.9);position:relative}
+.pop .thumb small{position:absolute;bottom:6px;left:10px;font-size:.68rem;opacity:.8}
+.pop .in{padding:12px 14px 14px}
+.pop h3{font-family:var(--serif);color:var(--navy);font-size:1.05rem;margin:7px 0 4px}
+.pop p{font-size:.84rem;line-height:1.45;color:#334155}
+.pop .meta{display:flex;gap:6px;align-items:center;font-size:.8rem;color:var(--mute);margin:8px 0 10px}
+.badge{display:inline-block;color:#fff;background:var(--c);font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:99px}
+.btn{display:flex;gap:8px;justify-content:center;align-items:center;width:100%;padding:11px;border-radius:12px;font-weight:700;background:var(--navy);color:#fff;transition:filter .2s,transform .1s}
+.btn:hover{filter:brightness(1.15)} .btn:active{transform:scale(.98)}
+.btn.gold{background:var(--gold);color:var(--navy)} .btn.ghost{background:rgba(0,33,71,.07);color:var(--navy);margin-top:6px}
+
+/* Markers */
+.pin{position:relative;width:36px;height:36px;border-radius:50%;background:var(--c);color:#fff;display:grid;place-items:center;border:3px solid #fff;box-shadow:0 4px 10px rgba(0,0,0,.35);transition:transform .2s}
+.pin::after{content:"";position:absolute;left:50%;bottom:-9px;margin-left:-6px;border:6px solid transparent;border-top:9px solid #fff;border-bottom:0}
+.pin.dark{color:var(--navy)}
+.pin:hover,.pin.hot{transform:scale(1.18)}
+.ring,.ring::after{position:absolute;left:50%;top:50%;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;border:2px solid var(--c);animation:radar 2.2s ease-out infinite;pointer-events:none}
+.ring::after{content:"";left:0;top:0;margin:-2px;animation-delay:1.1s}
+@keyframes radar{0%{transform:scale(.8);opacity:.9}100%{transform:scale(2.6);opacity:0}}
+.me{--c:#1a73e8;width:18px;height:18px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 2px #1a73e8;position:relative}
+.route-line{stroke-dasharray:10 12;animation:flow .8s linear infinite}
+.shuttle-line{stroke-dasharray:4 9;animation:flow 1.6s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-22}}
+
+/* Floating map buttons */
+.fabs{position:fixed;z-index:900;top:calc(14px + env(safe-area-inset-top,0px));right:14px;display:grid;gap:10px}
+.fab{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:var(--sh);color:var(--navy);transition:background .2s,color .2s}
+.fab[aria-pressed="true"]{background:var(--navy);color:var(--gold)}
+.fab.sos{background:var(--red);color:#fff;font-weight:800;font-size:.8rem}
+.fab.busy{animation:radar 1s infinite}
+#openPanel{display:none;position:fixed;z-index:900;left:14px;top:14px;width:auto;padding:0 18px;border-radius:99px;height:48px;font-weight:700;gap:8px;align-items:center}
+
+/* ===== 3. PANEL (glass sidebar / bottom sheet) ===== */
+.panel{position:fixed;z-index:1000;left:0;right:0;bottom:0;height:88vh;height:88dvh;display:flex;flex-direction:column;background:var(--glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:22px 22px 0 0;box-shadow:0 -8px 30px rgba(0,33,71,.25);transition:transform .35s cubic-bezier(.2,.8,.2,1);will-change:transform}
+.panel.drag{transition:none}
+.handle{touch-action:none;padding:10px 18px 4px;cursor:grab}
+.grip{width:46px;height:5px;border-radius:3px;background:var(--gold);margin:0 auto 10px}
+.head{display:flex;align-items:center;gap:12px}
+.crest{width:40px;height:40px;border-radius:10px;background:var(--navy);color:var(--gold);display:grid;place-items:center;font-family:var(--serif);font-weight:700;font-size:1.2rem}
+.head h1{font-family:var(--serif);color:var(--navy);font-size:1.15rem;line-height:1.1}
+.head small{color:var(--mute);font-size:.78rem}
+.head .x{margin-left:auto;display:none;width:36px;height:36px;border-radius:50%;background:rgba(0,33,71,.08);color:var(--navy);font-size:1.3rem}
+.tabs{display:flex;gap:4px;margin:8px 14px 0;padding:4px;background:rgba(0,33,71,.08);border-radius:12px}
+.tab{flex:1;padding:8px 4px;border-radius:9px;font-weight:600;font-size:.9rem;color:var(--mute);transition:background .2s,color .2s}
+.tab[aria-selected="true"]{background:var(--navy);color:var(--gold)}
+.body{flex:1;overflow-y:auto;overflow-x:hidden;padding:14px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.view[hidden]{display:none}
+@media(min-width:800px){
+  .panel{left:14px;top:14px;bottom:14px;right:auto;width:400px;height:auto;border-radius:var(--r);transform:none!important;box-shadow:var(--sh)}
+  .panel.closed{transform:translateX(-120%)!important}
+  .handle{cursor:default}.grip{display:none}.head .x{display:block}
+  #openPanel.show{display:flex}
+}
+
+/* Search + autosuggest */
+.search{position:relative}
+.search input{width:100%;padding:12px 14px 12px 42px;border-radius:12px;border:2px solid var(--line);background:#fff}
+.search input:focus{border-color:var(--navy);outline:none}
+.search>svg{position:absolute;left:13px;top:13px;color:var(--mute)}
+.suggest{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 6px);list-style:none;padding:6px;background:#fff;border-radius:12px;box-shadow:var(--sh);opacity:0;visibility:hidden;transform:translateY(-8px);transition:opacity .2s,transform .2s,visibility .2s}
+.suggest.open{opacity:1;visibility:visible;transform:none}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:12px 0 8px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:6px 14px;border-radius:99px;border:1.5px solid var(--line);background:#fff;font-weight:600;font-size:.85rem;color:var(--navy);transition:all .2s}
+.chip[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:var(--gold)}
+.count{font-size:.8rem;color:var(--mute);margin:4px 0 8px}
+.list{list-style:none;padding:0;display:grid;gap:6px}
+.item{width:100%;display:flex;gap:12px;align-items:center;text-align:left;padding:9px 10px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid var(--line);transition:background .2s,border-color .2s}
+.suggest .item{border:0;background:none}
+.item:hover,.item:focus-visible{background:#fff;border-color:var(--navy)}
+.ico{width:34px;height:34px;border-radius:10px;background:var(--c);color:#fff;display:grid;place-items:center}
+.ico.dark{color:var(--navy)}
+.item b{display:block;font-size:.92rem}.item span{font-size:.78rem;color:var(--mute)}
+.empty{text-align:center;color:var(--mute);padding:22px 8px;font-size:.9rem}
+
+/* Forms */
+.lbl{display:block;font-weight:700;font-size:.82rem;color:var(--navy);margin:12px 0 5px}
+select,.field{width:100%;padding:11px;border-radius:12px;border:2px solid var(--line);background:#fff}
+.seg{display:flex;padding:3px;border-radius:12px;background:rgba(0,33,71,.08);gap:3px}
+.seg button{flex:1;padding:8px;border-radius:9px;font-weight:600;color:var(--mute)}
+.seg button[aria-pressed="true"]{background:#fff;color:var(--navy);box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.row{display:flex;gap:8px;margin-top:14px}.row .btn:last-child{flex:0 0 52px}
+.out{margin-top:14px;padding:14px;border-radius:14px;background:rgba(212,175,55,.16);border:1px solid rgba(212,175,55,.6)}
+.out strong{font-family:var(--serif);font-size:1.5rem;color:var(--navy)}
+.steps{margin:10px 0 0 20px;font-size:.88rem;line-height:1.6;color:#27364d}
+.note{font-size:.76rem;color:var(--mute);line-height:1.45;margin-top:10px}
+.card{padding:14px;border-radius:14px;background:rgba(255,255,255,.75);border:1px solid var(--line);margin-bottom:12px}
+.card h2{font-family:var(--serif);font-size:1rem;color:var(--navy);margin-bottom:8px}
+.hall-out{margin-top:10px;font-size:.88rem;line-height:1.5}
+details{border-top:1px solid var(--line);padding:9px 0}summary{font-weight:600;cursor:pointer;color:var(--navy)}
+details p{font-size:.86rem;line-height:1.5;margin-top:6px;color:#334155}
+
+/* SOS dialog + toast */
+dialog{border:0;border-radius:var(--r);padding:0;width:min(92vw,380px);box-shadow:var(--sh);margin:auto}
+dialog::backdrop{background:rgba(0,33,71,.55);backdrop-filter:blur(3px)}
+.dlg-h{background:var(--red);color:#fff;padding:16px 18px}.dlg-h h2{font-family:var(--serif)}
+.dlg-b{padding:14px 18px 18px;display:grid;gap:10px}
+.sos-row{border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.sos-row b{display:block}.sos-row .num{font-size:1.25rem;font-weight:800;color:var(--red)}
+.sos-row .row{margin-top:8px}.sos-row .row .btn{flex:1;padding:9px}
+.toast{position:fixed;z-index:3000;left:50%;top:14px;transform:translate(-50%,-100px);background:var(--navy);color:#fff;padding:12px 18px;border-radius:12px;box-shadow:var(--sh);max-width:90vw;text-align:center;font-size:.88rem;transition:transform .3s}
+.toast.show{transform:translate(-50%,0)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="map" aria-label="UNILORIN campus map"></div>
+
+<div class="fabs">
+  <button class="fab sos" id="sosBtn" aria-label="Emergency contacts">SOS</button>
+  <button class="fab" id="locBtn" aria-label="Find my location" title="Find my location"><span id="icoLoc"></span></button>
+  <button class="fab" id="shuttleBtn" aria-pressed="false" aria-label="Show shuttle loop" title="Shuttle loop"><span id="icoShuttle"></span></button>
+</div>
+<button class="fab" id="openPanel">Open guide</button>
+
+<aside class="panel" id="panel">
+  <div class="handle" id="handle">
+    <div class="grip"></div>
+    <div class="head">
+      <div class="crest">U</div>
+      <div><h1>UNILORIN Smart Map</h1><small>Better by Far · guide for freshers</small></div>
+      <button class="x" id="closePanel" aria-label="Collapse guide">‹</button>
+    </div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="explore" aria-selected="true">Explore</button>
+    <button class="tab" role="tab" data-tab="route" aria-selected="false">Route</button>
+    <button class="tab" role="tab" data-tab="tools" aria-selected="false">Fresher tools</button>
+  </div>
+
+  <div class="body">
+    <section class="view" id="v-explore">
+      <div class="search">
+        <span id="icoSearch"></span>
+        <input id="q" type="search" placeholder="Search library, Village, ATM, clinic…" autocomplete="off" aria-label="Search landmarks">
+        <ul class="suggest" id="suggest" role="listbox"></ul>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="count" id="count" aria-live="polite"></div>
+      <ul class="list" id="list"></ul>
+    </section>
+
+    <section class="view" id="v-route" hidden>
+      <div class="seg" id="mode" role="group" aria-label="Travel mode">
+        <button data-mode="walk" aria-pressed="true">Walk</button>
+        <button data-mode="shuttle" aria-pressed="false">Shuttle / bus</button>
+      </div>
+      <label class="lbl" for="from">Origin</label><select id="from"></select>
+      <label class="lbl" for="to">Destination</label><select id="to"></select>
+      <div class="row"><button class="btn gold" id="go">Show route</button><button class="btn ghost" id="swap" style="margin:0" aria-label="Swap">⇅</button></div>
+      <button class="btn ghost" id="clear">Clear route</button>
+      <div class="out" id="out" hidden></div>
+      <p class="note">Tip: tap any pin on the map, then choose "Navigate Here" or "Start here". Paths are straight-line estimates, not surveyed footpaths.</p>
+    </section>
+
+    <section class="view" id="v-tools" hidden>
+      <div class="card">
+        <h2>Where is my lecture?</h2>
+        <input class="field" id="hall" placeholder="Type a course code, e.g. CIS 101" aria-label="Course code" autocomplete="off">
+        <div class="hall-out" id="hallOut">Enter a course code and press Enter.</div>
+      </div>
+      <div class="card">
+        <h2>Fresher tips</h2>
+        <details open><summary>Getting around</summary><p>Most places are walkable from the PS Bus Stop. Turn on the shuttle layer to see the main loop. Confirm current stops with seniors.</p></details>
+        <details><summary>Dress & conduct</summary><p>Dress neatly and modestly. Some faculties require lab coats, formal wear or safety gear. Your department will confirm.</p></details>
+        <details><summary>Library & CBT</summary><p>Register early for library access. Check your CBT centre venue and time a day before any test.</p></details>
+        <details><summary>Stay safe</summary><p>Move in groups at night, guard your phone and PIN, and save the SOS numbers on your phone.</p></details>
+      </div>
+      <div class="card">
+        <h2>Offline mode</h2>
+        <p class="note" style="margin:0" id="offNote"></p>
+      </div>
+    </section>
+  </div>
+</aside>
+
+<dialog id="sos">
+  <div class="dlg-h"><h2>Emergency contacts</h2><small>Tap to call or copy</small></div>
+  <div class="dlg-b" id="sosBody"></div>
+  <div class="dlg-b" style="padding-top:0"><button class="btn ghost" id="sosClose" style="margin:0">Close</button></div>
+</dialog>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   A. CONFIG & DATA  — the only section you need to edit to add places.
+   Coordinates are approximate; verify on openstreetmap.org (right-click > Show address).
+   ===================================================================== */
+const CFG = {
+  center: [8.4820, 4.6716], zoom: 16, minZoom: 15, maxZoom: 19,
+  bounds: [[8.4640, 4.6520], [8.4990, 4.6920]],
+  walkMpm: 80, shuttleMpm: 250, shuttleWaitMin: 4, detour: 1.3,
+  storeKey: "unilorin-map", dataVersion: 2,
+  cartoKey: "cb1_45gb_1_8b692627c641bfcc622acec8" // CARTO raster basemap key (removes the watermark)
+};
+
+// EDIT ME: replace blank numbers with official lines from your student handbook.
+const EMERGENCY = [
+  { name: "National emergency (police, fire, ambulance)", num: "112" },
+  { name: "UNILORIN Security", num: "" },
+  { name: "UNILORIN Clinic", num: "" },
+  { name: "Fire service", num: "112" }
+];
+
+// Category -> label, colour, icon, optional dark glyph (for light backgrounds)
+const CATS = {
+  academic:{ label:"Academic",  color:"#1565C0", icon:"book" },
+  admin:   { label:"Admin",     color:"#002147", icon:"building" },
+  transit: { label:"Transit",   color:"#D4AF37", icon:"bus", dark:1 },
+  hostel:  { label:"Hostels",   color:"#5E35B1", icon:"home" },
+  amenity: { label:"Amenities", color:"#EF6C00", icon:"star" },
+  medical: { label:"Medical",   color:"#C62828", icon:"cross" },
+  eco:     { label:"Eco-park",  color:"#2E7D32", icon:"leaf" }
+};
+const HUBS = ["ps", "gate", "motion", "taxi"];           // get pulsing radar rings
+const SHUTTLE = ["gate", "motion", "senate", "cis", "fet", "arts", "ps", "gate"]; // illustrative loop
+
+// [id, name, category, lat, lng, tag, description, keywords]
+const DEFAULT_PLACES = [
+  ["ps","PS (Permanent Site) Bus Stop","transit",8.4790,4.6700,"Transit hub","Main pick-up and drop-off point for buses and tricycles.","bus keke shuttle park"],
+  ["gate","Main Gate","transit",8.4700,4.6665,"Gateway","Principal entrance. Keep your admission letter or ID handy.","entrance security"],
+  ["motion","Motion Ground","transit",8.4765,4.6735,"Open ground","Large field for orientation, matriculation and events.","field sports orientation"],
+  ["taxi","Taxi Park","transit",8.4795,4.6685,"Taxi & keke","Taxis and tricycles to town and nearby areas.","cab keke ride"],
+  ["senate","Senate Building (7-storey)","admin",8.4822,4.6716,"Administration","Seat of the Vice-Chancellor, Registry and top management.","vc registry clearance admin"],
+  ["affairs","Student Affairs","admin",8.4815,4.6728,"Student welfare","Hostel matters, ID issues, welfare and student conduct.","dean welfare id"],
+  ["sub","Student Union Building (SUB)","admin",8.4808,4.6700,"Student life","Student union offices, eateries and shops.","suag food canteen"],
+  ["library","Central Library","academic",8.4830,4.6700,"Library","Reading halls and learning resources. Register early.","books study reading"],
+  ["cis","Faculty of CIS","academic",8.4845,4.6725,"Faculty · CIS","Communication & Information Sciences: computer science, IT, mass communication.","csc ift mac ict computer"],
+  ["arts","Faculty of Arts","academic",8.4838,4.6688,"Faculty · Arts","English, History, Languages, Religions and related departments.","english history linguistics"],
+  ["fet","Faculty of Engineering & Tech (FET)","academic",8.4850,4.6760,"Faculty · FET","Engineering departments and workshops.","engineering civil mechanical electrical"],
+  ["blk1","Block 1–5 Lecture Theatres","academic",8.4828,4.6742,"Lecture halls","Shared theatres for general courses and 100-level classes.","block 1 2 3 4 5 lecture gst"],
+  ["blk2","Block 6–10 Lecture Theatres","academic",8.4835,4.6752,"Lecture halls","More shared lecture halls. Check your timetable for the room.","block 6 7 8 9 10 lecture"],
+  ["cbt","CBT Centre","academic",8.4820,4.6748,"Computer tests","Computer-based tests and exams. Arrive early with your ID.","cbt exam test"],
+  ["v-lagos","Village I · Lagos","hostel",8.4860,4.6690,"Hostel · Village","On-campus residence. Confirm allocation with hostel management.","village 1 lagos"],
+  ["v-abuja","Village II · Abuja","hostel",8.4868,4.6705,"Hostel · Village","On-campus residence near the faculties.","village 2 abuja"],
+  ["v-zamfara","Village III · Zamfara","hostel",8.4872,4.6722,"Hostel · Village","On-campus residence. Bring your own bedding.","village 3 zamfara"],
+  ["arafims","Arafims Hostel","hostel",8.4775,4.6760,"Private hostel","Private accommodation near campus.","private hostel"],
+  ["sanusi","Sanusi Hostel","hostel",8.4770,4.6778,"Private hostel","Private accommodation popular with students.","private hostel"],
+  ["vegas","Las Vegas Hostel","hostel",8.4760,4.6765,"Private hostel","Private accommodation close to Motion Ground.","private hostel"],
+  ["clinic","UNILORIN Clinic","medical",8.4802,4.6672,"Health centre","Student health centre. Bring your ID and complete medical registration.","hospital doctor sick"],
+  ["eco","Dam / Eco-Park","eco",8.4875,4.6770,"Green space","Quiet natural spot for relaxing and study breaks.","dam garden nature"],
+  ["audit","Main Auditorium","amenity",8.4812,4.6738,"Events hall","Venue for ceremonies, convocation and major programmes.","hall events"],
+  ["mosque","Central Mosque","amenity",8.4800,4.6715,"Worship","Central place of Muslim worship on campus.","prayer jumat"],
+  ["bank","Commercial / Banking Area","amenity",8.4798,4.6695,"ATMs & food","Banks, ATMs, eateries and shops. Queues build at semester start.","atm bank cash pos food"]
+];
+
+// Course-code prefixes -> place (Lecture Hall Finder). Extend freely.
+const HALLS = [
+  [/^(CIS|CSC|IFT|MAC|ICT)$/, "cis"],
+  [/^(FET|EGR|MEE|CVE|EEE|CHE|ABE)$/, "fet"],
+  [/^(ENL|HIS|LIN|CRS|IRS|ARA|YOR|THR|PHI)$/, "arts"],
+  [/^(CBT|EXAM)$/, "cbt"],
+  [/^(GST|GNS|GES|MTH|PHY|CHM|BIO|STA|BCH)$/, "blk1"]
+];
+
+/* =====================================================================
+   B. HELPERS, ICONS, STORE
+   ===================================================================== */
+const $ = (s, e = document) => e.querySelector(s);
+const $$ = (s, e = document) => [...e.querySelectorAll(s)];
+const P = d => `<path d="${d}"/>`;
+const ICONS = {
+  book: P("M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z")+P("M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"),
+  building: P("M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18z")+P("M10 6h4M10 10h4M10 14h4M10 18h4"),
+  bus: P("M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10H4z")+P("M4 12h16M8 20v-4M16 20v-4"),
+  home: P("m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z")+P("M9 21v-7h6v7"),
+  star: P("m12 2 3 7 7 .6-5.3 4.7 1.6 7.2-6.3-3.7-6.3 3.7 1.6-7.2L2 9.6 9 9z"),
+  cross: P("M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"),
+  leaf: P("M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.500-4.800 10-10 10z")+P("M2 21c0-3 1.900-5.400 5.100-6"),
+  walk: '<circle cx="12" cy="12" r="9"/>'+P("M12 7v5l3 2"),
+  nav: P("m3 11 19-9-9 19-2-8z"),
+  search: '<circle cx="11" cy="11" r="7"/>'+P("m20 20-3.500-3.500"),
+  loc: '<circle cx="12" cy="12" r="4"/>'+P("M12 2v3M12 19v3M2 12h3M19 12h3"),
+  layers: P("m12 2 10 5-10 5L2 7z")+P("m2 17 10 5 10-5M2 12l10 5 10-5"),
+};
+const svg = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+
+// Offline-ready store: dataset is cached in localStorage and reused when the network is poor.
+const Store = {
+  load() {
+    try { const c = JSON.parse(localStorage.getItem(CFG.storeKey)); if (c && c.v === CFG.dataVersion) return { rows: c.rows, cached: true }; } catch {}
+    return { rows: DEFAULT_PLACES, cached: false };
+  },
+  save(rows) { try { localStorage.setItem(CFG.storeKey, JSON.stringify({ v: CFG.dataVersion, rows, at: Date.now() })); return true; } catch { return false; } }
+};
+const loaded = Store.load();
+const saved = Store.save(loaded.rows);
+const PLACES = loaded.rows.map(([id, name, cat, lat, lng, tag, desc, kw]) => ({ id, name, cat, lat, lng, tag, desc, kw }));
+const byId = id => PLACES.find(p => p.id === id);
+
+// Geometry
+const rad = d => d * Math.PI / 180;
+function haversine(a, b) { // metres
+  const x = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 12742000 * Math.asin(Math.sqrt(x));
+}
+function segInfo(p, a, b) { // distance (m) from p to segment ab, and position t along it
+  const k = 111320, cx = Math.cos(rad(a.lat)), f = q => [(q.lng - a.lng) * k * cx, (q.lat - a.lat) * k];
+  const [px, py] = f(p), [bx, by] = f(b), t = Math.max(0, Math.min(1, (px * bx + py * by) / (bx * bx + by * by || 1)));
+  return { d: Math.hypot(px - bx * t, py - by * t), t };
+}
+const compass = (a, b) => ["north","north-east","east","south-east","south","south-west","west","north-west"][Math.round(((Math.atan2(b.lng - a.lng, b.lat - a.lat) * 180 / Math.PI + 360) % 360) / 45) % 8];
+const fmtDist = m => m >= 1000 ? (m / 1000).toFixed(2) + " km" : Math.round(m) + " m";
+const walkMin = m => Math.max(1, Math.round(m * CFG.detour / CFG.walkMpm));
+const isMobile = () => matchMedia("(max-width:799px)").matches;
+
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 4000); }
+
+/* =====================================================================
+   C. MAP, MARKERS, POPUPS
+   ===================================================================== */
+const map = L.map("map", { center: CFG.center, zoom: CFG.zoom, minZoom: CFG.minZoom, maxZoom: CFG.maxZoom, maxBounds: CFG.bounds, maxBoundsViscosity: .9, zoomControl: false });
+L.control.zoom({ position: "bottomright" }).addTo(map);
+L.tileLayer(`https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${CFG.cartoKey}`, {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+}).addTo(map);
+const markerLayer = L.layerGroup().addTo(map);
+const markers = new Map();
+
+function pinIcon(p) {
+  const c = CATS[p.cat];
+  return L.divIcon({ className: "", iconSize: [36, 45], iconAnchor: [18, 45], popupAnchor: [0, -42],
+    html: `<div style="--c:${c.color}">${HUBS.includes(p.id) ? '<span class="ring"></span>' : ""}<div class="pin ${c.dark ? "dark" : ""}" style="--c:${c.color}">${svg(c.icon, 18)}</div></div>` });
+}
+function popupHTML(p) {
+  const c = CATS[p.cat], ps = byId("ps");
+  const walk = p.id === "ps" ? "You are at the hub" : `${walkMin(haversine(ps, p))} min walk from PS Bus Stop`;
+  return `<div class="pop" style="--c:${c.color}">
+    <div class="thumb">${svg(c.icon, 34)}<small>Photo coming soon</small></div>
+    <div class="in"><span class="badge">${p.tag}</span><h3>${p.name}</h3><p>${p.desc}</p>
+    <div class="meta">${svg("walk", 15)} ${walk}</div>
+    <button class="btn gold" data-act="to" data-id="${p.id}">${svg("nav", 16)} Navigate Here</button>
+    <button class="btn ghost" data-act="from" data-id="${p.id}">Start here</button></div></div>`;
+}
+PLACES.forEach(p => markers.set(p.id, L.marker([p.lat, p.lng], { icon: pinIcon(p), title: p.name }).bindPopup(popupHTML(p), { maxWidth: 250, autoPanPaddingTopLeft: [20, 70], autoPanPaddingBottomRight: [20, 120] })));
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const p = byId(b.dataset.id);
+  if (b.dataset.act === "to") { Route.to = p; if (!Route.from || Route.from.id === p.id) Route.from = User.pos || byId("ps"); }
+  else { Route.from = p; }
+  map.closePopup(); Route.draw(); UI.tab("route");
+});
+
+/* =====================================================================
+   D. SEARCH, FILTERS, AUTOSUGGEST
+   ===================================================================== */
+const Filter = { cat: null, q: "" };
+const match = p => (!Filter.cat || p.cat === Filter.cat) && (!Filter.q.trim() || Filter.q.toLowerCase().split(/\s+/).every(w => `${p.name} ${p.kw} ${p.tag} ${CATS[p.cat].label}`.toLowerCase().includes(w)));
+const itemHTML = p => `<li><button class="item" data-id="${p.id}"><span class="ico ${CATS[p.cat].dark ? "dark" : ""}" style="--c:${CATS[p.cat].color}">${svg(CATS[p.cat].icon, 18)}</span><div><b>${p.name}</b><span>${p.tag}</span></div></button></li>`;
+
+function render() {
+  const res = PLACES.filter(match);
+  markerLayer.clearLayers(); res.forEach(p => markerLayer.addLayer(markers.get(p.id)));
+  $("#count").textContent = `${res.length} place${res.length === 1 ? "" : "s"}`;
+  $("#list").innerHTML = res.length ? res.map(itemHTML).join("") : '<li class="empty">No match. Try another word or pick "All".</li>';
+  const s = $("#suggest"), show = Filter.q.trim() && res.length;
+  s.innerHTML = res.slice(0, 6).map(itemHTML).join(""); s.classList.toggle("open", !!show);
+}
+function focusPlace(id, opts = {}) {
+  const p = byId(id), m = markers.get(id); if (!p) return;
+  if (!markerLayer.hasLayer(m)) markerLayer.addLayer(m);
+  $("#suggest").classList.remove("open");
+  if (isMobile()) UI.snap("peek");
+  map.flyTo([p.lat, p.lng], 18, { duration: .8 });
+  map.once("moveend", () => { m.openPopup(); const el = m.getElement()?.querySelector(".pin"); if (el && opts.pulse) { el.classList.add("hot"); setTimeout(() => el.classList.remove("hot"), 4000); } });
+}
+$("#chips").innerHTML = [["", "All"], ...Object.entries(CATS).map(([k, c]) => [k, c.label])].map(([k, l], i) => `<button class="chip" data-cat="${k}" aria-pressed="${i === 0}">${l}</button>`).join("");
+$("#chips").addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  Filter.cat = b.dataset.cat || null; $$(".chip").forEach(c => c.setAttribute("aria-pressed", c === b)); render();
+  const r = PLACES.filter(match); if (r.length > 1) map.flyToBounds(L.latLngBounds(r.map(p => [p.lat, p.lng])).pad(.3), { maxZoom: 17, duration: .6 });
+});
+$("#q").addEventListener("input", e => { Filter.q = e.target.value; render(); });
+$("#q").addEventListener("focus", render);
+$("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const f = PLACES.find(match); if (f) focusPlace(f.id); } });
+document.addEventListener("pointerdown", e => { if (!e.target.closest(".search")) $("#suggest").classList.remove("open"); });
+["#list", "#suggest"].forEach(s => $(s).addEventListener("click", e => { const b = e.target.closest(".item"); if (b) focusPlace(b.dataset.id); }));
+
+/* =====================================================================
+   E. GEOLOCATION
+   ===================================================================== */
+const User = { pos: null, layer: null,
+  locate() {
+    return new Promise(res => {
+      if (!navigator.geolocation) { toast("Your browser doesn't support location."); return res(false); }
+      $("#locBtn").classList.add("busy");
+      navigator.geolocation.getCurrentPosition(g => {
+        $("#locBtn").classList.remove("busy");
+        const { latitude: lat, longitude: lng, accuracy } = g.coords;
+        User.pos = { id: "me", name: "My location", lat, lng };
+        User.layer?.remove();
+        User.layer = L.layerGroup([L.circle([lat, lng], { radius: accuracy, color: "#1a73e8", weight: 1, fillOpacity: .1 }),
+          L.marker([lat, lng], { icon: L.divIcon({ className: "", iconSize: [18, 18], html: '<div style="--c:#1a73e8"><span class="ring"></span><div class="me"></div></div>' }) }).bindTooltip("You are here")]).addTo(map);
+        const on = L.latLngBounds(CFG.bounds).contains([lat, lng]);
+        on ? map.flyTo([lat, lng], 17) : toast("You're off campus, so your position is outside this map.");
+        Route.fill(); res(on);
+      }, err => { $("#locBtn").classList.remove("busy"); toast(err.code === 1 ? "Location blocked. Allow it in browser settings." : "Couldn't get your location. Try outdoors."); res(false); }, { enableHighAccuracy: true, timeout: 12000 });
+    });
+  }
+};
+$("#locBtn").addEventListener("click", () => User.locate());
+
+/* =====================================================================
+   F. ROUTE ENGINE (distance, time, steps) + SHUTTLE OVERLAY
+   ===================================================================== */
+const Route = { from: null, to: null, mode: "walk", layer: null,
+  fill() {
+    const f = $("#from"), t = $("#to"), fv = f.value, tv = t.value;
+    const opts = PLACES.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+    f.innerHTML = (User.pos ? '<option value="me">My location</option>' : "") + opts; t.innerHTML = opts;
+    f.value = [...f.options].some(o => o.value === fv) ? fv : (User.pos ? "me" : "ps"); t.value = tv || "library";
+  },
+  draw() {
+    const { from: a, to: b } = this; if (!a || !b) return;
+    if (a.id === b.id) return toast("Origin and destination are the same.");
+    this.layer?.remove();
+    const pts = [[a.lat, a.lng], [b.lat, b.lng]];
+    this.layer = L.layerGroup([L.polyline(pts, { color: "#002147", weight: 10, opacity: .3 }),
+      L.polyline(pts, { color: "#D4AF37", weight: 5, className: "route-line", lineCap: "round" }),
+      L.circleMarker(pts[0], { radius: 8, color: "#fff", weight: 3, fillColor: "#2E7D32", fillOpacity: 1 }),
+      L.circleMarker(pts[1], { radius: 8, color: "#fff", weight: 3, fillColor: "#C62828", fillOpacity: 1 })]).addTo(map);
+    map.fitBounds(L.latLngBounds(pts).pad(.5), { maxZoom: 18 }); if (isMobile()) UI.snap("peek");
+
+    const m = haversine(a, b) * CFG.detour;
+    const mins = this.mode === "walk" ? walkMin(haversine(a, b)) : Math.round(CFG.shuttleWaitMin + m / CFG.shuttleMpm);
+    const via = PLACES.filter(p => p.id !== a.id && p.id !== b.id).map(p => ({ p, ...segInfo(p, a, b) })).filter(o => o.d < 90 && o.t > .1 && o.t < .9).sort((x, y) => x.t - y.t).slice(0, 3);
+    const steps = [`Start at <b>${a.name}</b> and head ${compass(a, b)} toward ${b.name}.`,
+      ...via.map(o => `Pass <b>${o.p.name}</b> (about ${fmtDist(o.t * m)} in).`), `Arrive at <b>${b.name}</b>.`];
+    $("#out").hidden = false;
+    $("#out").innerHTML = `<strong>${mins} min ${this.mode === "walk" ? "walk" : "by shuttle"}</strong><br>${fmtDist(m)} · ${a.name} to ${b.name}
+      <ol class="steps">${steps.map(s => `<li>${s}</li>`).join("")}</ol>${this.mode === "shuttle" ? '<p class="note">Shuttle time includes a typical wait. Check real stops with seniors.</p>' : ""}`;
+    $("#from").value = a.id; $("#to").value = b.id;
+  },
+  clear() { this.layer?.remove(); this.layer = null; $("#out").hidden = true; }
+};
+const pick = id => id === "me" ? User.pos : byId(id);
+$("#go").onclick = () => { Route.from = pick($("#from").value); Route.to = pick($("#to").value); Route.draw(); };
+$("#swap").onclick = () => { const f = $("#from"), t = $("#to"); if (t.value === "me") return; [f.value, t.value] = [t.value, f.value === "me" ? t.value : f.value]; };
+$("#clear").onclick = () => Route.clear();
+$("#mode").onclick = e => { const b = e.target.closest("button"); if (!b) return; Route.mode = b.dataset.mode; $$("#mode button").forEach(x => x.setAttribute("aria-pressed", x === b)); if (Route.layer) Route.draw(); };
+
+// Shuttle loop overlay
+const shuttleLayer = L.layerGroup([
+  L.polyline(SHUTTLE.map(id => [byId(id).lat, byId(id).lng]), { color: "#2E7D32", weight: 10, opacity: .25 }),
+  L.polyline(SHUTTLE.map(id => [byId(id).lat, byId(id).lng]), { color: "#2E7D32", weight: 4, className: "shuttle-line" }),
+  ...[...new Set(SHUTTLE)].map(id => L.circleMarker([byId(id).lat, byId(id).lng], { radius: 6, color: "#fff", weight: 2, fillColor: "#2E7D32", fillOpacity: 1 }).bindTooltip(byId(id).name + " (stop)"))
+]);
+$("#shuttleBtn").onclick = e => {
+  const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+  e.currentTarget.setAttribute("aria-pressed", on);
+  on ? (shuttleLayer.addTo(map), toast("Shuttle loop (illustrative): " + SHUTTLE.map(id => byId(id).name.split(" (")[0]).join(" → "))) : shuttleLayer.remove();
+};
+
+/* =====================================================================
+   G. FRESHER TOOLS: Lecture Hall Finder + SOS
+   ===================================================================== */
+$("#hall").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const raw = e.target.value.trim(), letters = (raw.toUpperCase().match(/^[A-Z]+/) || [""])[0], out = $("#hallOut");
+  const hit = HALLS.find(([re]) => re.test(letters));
+  if (hit) {
+    const p = byId(hit[1]);
+    out.innerHTML = `<b>${raw.toUpperCase()}</b> classes are usually at <b>${p.name}</b>, about ${walkMin(haversine(byId("ps"), p))} min from PS. Your timetable has the final room.`;
+    focusPlace(p.id, { pulse: true });
+  } else {
+    const p = PLACES.find(x => `${x.name} ${x.kw}`.toLowerCase().includes(raw.toLowerCase())) ;
+    out.textContent = p && raw ? `No course-code match, but found ${p.name}.` : "No match yet. Try a code like CIS 101, GST 111 or FET 201.";
+    if (p && raw) focusPlace(p.id);
+  }
+});
+$("#sosBody").innerHTML = EMERGENCY.map(c => `<div class="sos-row"><b>${c.name}</b>
+  ${c.num ? `<span class="num">${c.num}</span><div class="row"><a class="btn gold" href="tel:${c.num}">Call</a><button class="btn ghost" style="margin:0" data-copy="${c.num}">Copy</button></div>` : '<small class="note">Number not set. Add it in EMERGENCY (see your student handbook).</small>'}</div>`).join("");
+$("#sos").addEventListener("click", e => {
+  const c = e.target.closest("[data-copy]");
+  if (c) navigator.clipboard?.writeText(c.dataset.copy).then(() => toast("Number copied")).catch(() => toast("Copy failed"));
+  if (e.target === $("#sos")) $("#sos").close();
+});
+$("#sosBtn").onclick = () => $("#sos").showModal();
+$("#sosClose").onclick = () => $("#sos").close();
+
+/* =====================================================================
+   H. UI: tabs, desktop collapse, draggable mobile bottom sheet
+   ===================================================================== */
+const panel = $("#panel");
+const UI = {
+  tab(n) { $$(".tab").forEach(t => t.setAttribute("aria-selected", t.dataset.tab === n)); ["explore", "route", "tools"].forEach(v => $("#v-" + v).hidden = v !== n); isMobile() ? this.snap(this.y > 0 && this.y > panel.offsetHeight * .6 ? "half" : this.state === "full" ? "full" : "half") : this.open(true); },
+  open(o) { panel.classList.toggle("closed", !o); $("#openPanel").classList.toggle("show", !o); setTimeout(() => map.invalidateSize(), 360); },
+  y: 0, state: "half",
+  pts() { const h = panel.offsetHeight; return { full: 0, half: h * .5, peek: h - 96 }; },
+  snap(name) { this.state = name; this.y = this.pts()[name]; panel.classList.remove("drag"); panel.style.transform = `translateY(${this.y}px)`; }
+};
+$$(".tab").forEach(t => t.onclick = () => UI.tab(t.dataset.tab));
+$("#closePanel").onclick = () => UI.open(false); $("#openPanel").onclick = () => UI.open(true);
+
+// Drag handling (pointer events work for touch + mouse)
+(() => {
+  const h = $("#handle"); let sy, y0, lastY, lastT, v = 0;
+  h.addEventListener("pointerdown", e => { if (!isMobile() || e.target.closest("button")) return; h.setPointerCapture(e.pointerId); sy = e.clientY; y0 = UI.y; lastY = sy; lastT = e.timeStamp; panel.classList.add("drag"); });
+  h.addEventListener("pointermove", e => {
+    if (sy == null) return;
+    const max = UI.pts().peek; UI.y = Math.min(max, Math.max(0, y0 + e.clientY - sy)); panel.style.transform = `translateY(${UI.y}px)`;
+    v = (e.clientY - lastY) / Math.max(1, e.timeStamp - lastT); lastY = e.clientY; lastT = e.timeStamp;
+  });
+  const end = () => { if (sy == null) return; sy = null; const pts = UI.pts(), y = UI.y + v * 180; UI.snap(Object.keys(pts).reduce((a, k) => Math.abs(pts[k] - y) < Math.abs(pts[a] - y) ? k : a)); };
+  h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end);
+})();
+addEventListener("resize", () => { if (isMobile()) UI.snap(UI.state); else panel.style.transform = ""; });
+
+/* =====================================================================
+   I. INIT
+   ===================================================================== */
+$("#icoLoc").innerHTML = svg("loc", 22); $("#icoShuttle").innerHTML = svg("layers", 22); $("#icoSearch").innerHTML = svg("search", 18);
+$("#offNote").textContent = saved ? `${PLACES.length} landmarks are saved on this device, so search and info work without data. Map tiles only load for areas you've already viewed while online.` : "Couldn't save data for offline use (private browsing?).";
+addEventListener("offline", () => toast("You're offline. Landmark info and search still work."));
+addEventListener("online", () => toast("Back online."));
+render(); Route.fill();
+isMobile() ? UI.snap("half") : UI.open(true);
+</script>
+</body>
+</html>
